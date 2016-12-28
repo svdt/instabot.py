@@ -62,6 +62,7 @@ class InstaBot:
     # All counter.
     bot_mode = 0
     like_counter = 0
+    unlike_counter = 0
     follow_counter = 0
     unfollow_counter = 0
     comments_counter = 0
@@ -101,10 +102,11 @@ class InstaBot:
     login_status = False
 
     # For new_auto_mod
-    next_iteration = {"Like": 0, "Follow": 0, "Unfollow": 0, "Comments": 0}
+    next_iteration = {"Like": 0, "Follow": 0, "Unfollow": 0, "Comments": 0, "Unlike": 0}
 
     def __init__(self, login, password,
                  like_per_day=1000,
+                 unlike_like_after=3600,
                  media_max_like=50,
                  media_min_like=0,
                  follow_per_day=0,
@@ -128,10 +130,14 @@ class InstaBot:
         self.tag_blacklist = tag_blacklist
 
         self.time_in_day = 24 * 60 * 60
-        # Like
+        # Like & Unline
         self.like_per_day = like_per_day
+        self.unlike_like_after = unlike_like_after
         if self.like_per_day != 0:
             self.like_delay = self.time_in_day / self.like_per_day
+            if self.unlike_like_after != 0:
+                # Added 20 for ensuring, that the bot has 1 like before unliking
+                self.unlike_delay = self.like_delay + 20
 
         # Follow
         self.follow_time = follow_time
@@ -177,6 +183,7 @@ class InstaBot:
         self.media_by_tag = []
         self.media_on_feed = []
         self.media_by_user = []
+        self.media_liked_by_id = []
         self.unwanted_username_list = unwanted_username_list
         now_time = datetime.datetime.now()
         log_string = 'Instabot v1.1.0 started at %s:\n' % \
@@ -247,8 +254,8 @@ class InstaBot:
 
     def logout(self):
         now_time = datetime.datetime.now()
-        log_string = 'Logout: likes - %i, follow - %i, unfollow - %i, comments - %i.' % \
-                     (self.like_counter, self.follow_counter,
+        log_string = 'Logout: likes - %i, unlikes - %i, follow - %i, unfollow - %i, comments - %i.' % \
+                     (self.like_counter, self.unlike_counter, self.follow_counter,
                       self.unfollow_counter, self.comments_counter)
         self.write_log(log_string)
         work_time = datetime.datetime.now() - self.bot_start
@@ -276,6 +283,16 @@ class InstaBot:
                 self.write_log(log_string)
                 time.sleep(sleeptime)
                 self.bot_follow_list.remove(f)
+
+        if self.unlike_like_after != 0:
+            for u in self.media_liked_by_id:
+                log_string = "Trying to unlike: %s" % (u)
+                self.write_log(log_string)
+                self.unlike_on_cleanup(u)
+                sleeptime = random.randint(10, 30)
+                log_string = "Pausing for %i seconds... %i of %i" % (sleeptime, self.unlike_counter, self.like_counter)
+                self.write_log(log_string)
+                time.sleep(sleeptime)
 
         # Logout
         if (self.login_status):
@@ -407,6 +424,7 @@ class InstaBot:
             try:
                 like = self.s.post(url_likes)
                 last_liked_media_id = media_id
+                self.media_liked_by_id += [media_id]
             except:
                 self.write_log("Except on like!")
                 like = 0
@@ -414,14 +432,50 @@ class InstaBot:
 
     def unlike(self, media_id):
         """ Send http request to unlike media by ID """
+        log_string = "Trying to unlinke: %s" % (media_id)
+        self.write_log(log_string)
         if (self.login_status):
             url_unlike = self.url_unlike % (media_id)
             try:
                 unlike = self.s.post(url_unlike)
+                self.unlike_counter += 1
+                log_string = "Unliked: %s. Unlike #%i." % (media_id, self.unlike_counter)
+                self.write_log(log_string)
+                unlike = 1
             except:
                 self.write_log("Except on unlike!")
                 unlike = 0
             return unlike
+
+    def unlike_on_cleanup(self, media_id):
+        """ Unlike on cleanup """
+        if (self.login_status):
+            url_unlike = self.url_unlike % (media_id)
+            try:
+                unlike = self.s.post(url_unlike)
+                if unlike.status_code == 200:
+                    self.unlike_counter += 1
+                    log_string = "Unlike: %s #%i of %i." % (media_id, self.unlike_counter, self.like_counter)
+                    self.write_log(log_string)
+                else:
+                    log_string = "Slow Down - Pausing for 5 minutes so we don't get banned!"
+                    self.write_log(log_string)
+                    time.sleep(300)
+                    unlike = self.s.post(unlike)
+                    if unlike.status_code == 200:
+                        self.unlike_counter += 1
+                        log_string = "Unlike: %s #%i of %i." % (media_id, self.unlike_counter, self.like_counter)
+                        self.write_log(log_string)
+                    else:
+                        log_string = "Still no good :( Skipping and pausing for another 5 minutes"
+                        self.write_log(log_string)
+                        time.sleep(300)
+                    return False
+                return unlike
+            except:
+                log_string = "Except on unlike... Looks like a network error"
+                self.write_log(log_string)
+        return False
 
     def comment(self, media_id, comment_text):
         """ Send http request to comment """
@@ -517,6 +571,8 @@ class InstaBot:
                 self.max_tag_like_count = random.randint(1, self.max_like_for_one_tag)
             # ------------------- Like -------------------
             self.new_auto_mod_like()
+            # ------------------- Unlike -------------------
+            self.new_auto_mod_unlike()
             # ------------------- Follow -------------------
             self.new_auto_mod_follow()
             # ------------------- Unfollow -------------------
@@ -541,6 +597,18 @@ class InstaBot:
                     self.media_by_tag = [0]
             # Del first media_id
             del self.media_by_tag[0]
+
+    def new_auto_mod_unlike(self):
+        if self.unlike_like_after != 0:
+            if len(self.media_liked_by_id) == 0 or len(self.media_liked_by_id) == 1:
+                self.next_iteration["Unlike"] = time.time() + self.add_time(self.like_delay) + self.unlike_like_after
+            if time.time() > self.next_iteration["Unlike"] and self.like_per_day != 0 and len(self.media_liked_by_id) > 1:
+                # You have media_id to unlike:
+                if self.unlike(self.media_liked_by_id[0]) == 1:
+                    # If unlike go to sleep:
+                    self.next_iteration["Unlike"] = time.time() + self.add_time(self.like_delay)
+                    # Del first media_id
+                del self.media_liked_by_id[0]
 
     def new_auto_mod_follow(self):
         if time.time() > self.next_iteration["Follow"] and \
