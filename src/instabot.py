@@ -62,6 +62,7 @@ class InstaBot:
     # All counter.
     bot_mode = 0
     like_counter = 0
+    like_status = 0
     unlike_counter = 0
     follow_counter = 0
     unfollow_counter = 0
@@ -128,16 +129,13 @@ class InstaBot:
         self.unfollow_break_max = unfollow_break_max
         self.user_blacklist = user_blacklist
         self.tag_blacklist = tag_blacklist
+        self.unlike_like_after = unlike_like_after
 
         self.time_in_day = 24 * 60 * 60
-        # Like & Unline
+        # Like
         self.like_per_day = like_per_day
-        self.unlike_like_after = unlike_like_after
         if self.like_per_day != 0:
             self.like_delay = self.time_in_day / self.like_per_day
-            if self.unlike_like_after != 0:
-                # Added 20 for ensuring, that the bot has 1 like before unliking
-                self.unlike_delay = self.like_delay + 20
 
         # Follow
         self.follow_time = follow_time
@@ -177,6 +175,7 @@ class InstaBot:
             }
             self.s.proxies.update(proxies)
         # convert login to lower
+        self.like_status = 0
         self.user_login = login.lower()
         self.user_password = password
         self.bot_mode = 0
@@ -425,14 +424,16 @@ class InstaBot:
                 like = self.s.post(url_likes)
                 last_liked_media_id = media_id
                 self.media_liked_by_id += [media_id]
+                self.like_status = 1
             except:
                 self.write_log("Except on like!")
+                like_status = 0
                 like = 0
             return like
 
     def unlike(self, media_id):
         """ Send http request to unlike media by ID """
-        log_string = "Trying to unlinke: %s" % (media_id)
+        log_string = "Trying to unlike: %s" % (media_id)
         self.write_log(log_string)
         if (self.login_status):
             url_unlike = self.url_unlike % (media_id)
@@ -599,8 +600,8 @@ class InstaBot:
             del self.media_by_tag[0]
 
     def new_auto_mod_unlike(self):
-        if self.unlike_like_after != 0:
-            if len(self.media_liked_by_id) == 0 or len(self.media_liked_by_id) == 1:
+        if self.unlike_like_after != 0 and self.like_status == 1:
+            if len(self.media_liked_by_id) < 2:
                 self.next_iteration["Unlike"] = time.time() + self.add_time(self.like_delay) + self.unlike_like_after
             if time.time() > self.next_iteration["Unlike"] and self.like_per_day != 0 and len(self.media_liked_by_id) > 1:
                 # You have media_id to unlike:
