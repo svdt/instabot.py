@@ -610,6 +610,8 @@ class InstaBot:
                     self.next_iteration["Unlike"] = time.time() + self.add_time(self.like_delay)
                     # Del first media_id
                 del self.media_liked_by_id[0]
+        else:
+            self.next_iteration["Unlike"] = time.time() + self.add_time(self.like_delay)
 
     def new_auto_mod_follow(self):
         if time.time() > self.next_iteration["Follow"] and \
