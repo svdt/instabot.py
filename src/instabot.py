@@ -119,13 +119,15 @@ class InstaBot:
                  proxy="",
                  user_blacklist={},
                  tag_blacklist=[],
-                 unwanted_username_list=[]):
+                 unwanted_username_list=[]
+                 user_avoid_rules={}):
 
         self.bot_start = datetime.datetime.now()
         self.unfollow_break_min = unfollow_break_min
         self.unfollow_break_max = unfollow_break_max
         self.user_blacklist = user_blacklist
         self.tag_blacklist = tag_blacklist
+        self.user_avoid_rules = user_avoid_rules
 
         self.time_in_day = 24 * 60 * 60
         # Like
@@ -184,6 +186,7 @@ class InstaBot:
         self.write_log(log_string)
         self.login()
         self.populate_user_blacklist()
+        self.populate_user_norules()
         signal.signal(signal.SIGTERM, self.cleanup)
         atexit.register(self.cleanup)
 
@@ -201,6 +204,27 @@ class InstaBot:
             time.sleep(5 * random.random())
 
         log_string = "Completed populating user blacklist with IDs"
+        self.write_log(log_string)
+
+    def populate_user_norules(self):
+        for user in self.user_avoid_rules:
+            try:
+                if not self.user_avoid_rules[user]:
+                    user_id_url = self.url_user_detail % (user)
+                    info = self.s.get(user_id_url)
+                    all_data = json.loads(info.text)
+                    id_user = all_data['user']['media']['nodes'][0]['owner']['id']
+                    #Update the user_name with the user_id
+                    self.user_avoid_rules[user]=id_user
+                    log_string = "No rules for user %s added with ID: %s" % (user, id_user)
+                    self.write_log(log_string)
+                    time.sleep(5 * random.random())
+                else:
+                    log_string = "ID already gathered for user: %s" % (self.user_avoid_rules[user])
+                    self.write_log(log_string)
+            except:
+                log_string = "Encountered error with user: %s" % (user)
+        log_string = "Completed populating no-rules-applies for users with IDs\n"
         self.write_log(log_string)
 
     def login(self):
@@ -456,6 +480,11 @@ class InstaBot:
 
     def unfollow(self, user_id):
         """ Send http request to unfollow """
+        # Avoid unfollowing Selebgram you like ;-) 4ever 9gag
+        for norules_user_name, norules_user_id in self.user_avoid_rules.items():
+            if (user_id == norules_user_id):
+                self.write_log("Not unfollowing user with 'norules' applied: " + norules_user_name)
+                return False
         if (self.login_status):
             url_unfollow = self.url_unfollow % (user_id)
             try:
