@@ -119,7 +119,7 @@ class InstaBot:
                  proxy="",
                  user_blacklist={},
                  tag_blacklist=[],
-                 unwanted_username_list=[]
+                 unwanted_username_list=[],
                  user_avoid_rules={}):
 
         self.bot_start = datetime.datetime.now()
