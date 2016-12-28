@@ -427,7 +427,7 @@ class InstaBot:
                 self.like_status = 1
             except:
                 self.write_log("Except on like!")
-                like_status = 0
+                self.like_status = 0
                 like = 0
             return like
 
