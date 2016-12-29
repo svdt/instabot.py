@@ -462,7 +462,7 @@ class InstaBot:
                     log_string = "Slow Down - Pausing for 5 minutes so we don't get banned!"
                     self.write_log(log_string)
                     time.sleep(300)
-                    unlike = self.s.post(unlike)
+                    unlike = self.s.post(url_unlike)
                     if unlike.status_code == 200:
                         self.unlike_counter += 1
                         log_string = "Unlike: %s #%i of %i." % (media_id, self.unlike_counter, self.like_counter)
