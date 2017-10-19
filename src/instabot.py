@@ -11,10 +11,9 @@ import json
 import atexit
 import signal
 import itertools
-import sys
+import sys, cgitb
 
 from unfollow_protocol import unfollow_protocol
-
 class InstaBot:
     """
     Instagram bot v 1.1.0
@@ -46,7 +45,9 @@ class InstaBot:
     url_login = 'https://www.instagram.com/accounts/login/ajax/'
     url_logout = 'https://www.instagram.com/accounts/logout/'
     url_media_detail = 'https://www.instagram.com/p/%s/?__a=1'
+    url_media = 'https://www.instagram.com/p/%s/'
     url_user_detail = 'https://www.instagram.com/%s/?__a=1'
+    url_user = 'https://www.instagram.com/%s/'
 
     user_agent = ("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/48.0.2564.103 Safari/537.36")
@@ -90,7 +91,7 @@ class InstaBot:
 
 
     # Log setting.
-    log_file_path = ''
+    log_file_path = '/var/www/public_html/instagram/%s.log'
     log_file = 0
 
     # Other.
@@ -111,11 +112,23 @@ class InstaBot:
                  follow_time=5 * 60 * 60,
                  unfollow_per_day=0,
                  comments_per_day=0,
+                 comment_list=[['this', 'the', 'your'],
+                 ['photo', 'picture', 'pic', 'shot', 'snapshot'],
+                 ['is', 'looks', 'feels', 'is really'],
+                 ['great', 'super', 'good', 'very good',
+                  'good', 'wow', 'WOW', 'cool',
+                  'GREAT', 'magnificent', 'magical', 'very cool',
+                  'stylish', 'so stylish', 'beautiful',
+                  'so beautiful', 'so stylish', 'so professional',
+                  'lovely', 'so lovely', 'very lovely',
+                  'glorious', 'so glorious', 'very glorious',
+                  'adorable', 'excellent', 'amazing'],
+                 ['.', '..', '...', '!', '!!', '!!!']],
                  tag_list=['cat', 'car', 'dog'],
                  max_like_for_one_tag=5,
                  unfollow_break_min=15,
                  unfollow_break_max=30,
-                 log_mod=0,
+                 log_mod=1,
                  proxy="",
                  user_blacklist={},
                  tag_blacklist=[],
@@ -126,6 +139,7 @@ class InstaBot:
         self.unfollow_break_max = unfollow_break_max
         self.user_blacklist = user_blacklist
         self.tag_blacklist = tag_blacklist
+        self.comment_list = comment_list
 
         self.time_in_day = 24 * 60 * 60
         # Like
@@ -356,7 +370,8 @@ class InstaBot:
 
                             log_string = "Trying to like media: %s" % \
                                          (self.media_by_tag[i]['id'])
-                            self.write_log(log_string)
+                            media_url = self.url_media % (self.media_by_tag[i]['code'])
+                            self.write_log(log_string+" - "+media_url)
                             like = self.like(self.media_by_tag[i]['id'])
                             # comment = self.comment(self.media_by_tag[i]['id'], 'Cool!')
                             # follow = self.follow(self.media_by_tag[i]["owner"]["id"])
@@ -464,7 +479,7 @@ class InstaBot:
                     self.unfollow_counter += 1
                     log_string = "Unfollow: %s #%i." % (user_id, self.unfollow_counter)
                     self.write_log(log_string)
-                return unfollow
+                return unfollow.status_code
             except:
                 self.write_log("Exept on unfollow!")
         return False
@@ -515,6 +530,8 @@ class InstaBot:
                 self.get_media_id_by_tag(random.choice(self.tag_list))
                 self.this_tag_like_count = 0
                 self.max_tag_like_count = random.randint(1, self.max_like_for_one_tag)
+
+            #self.write_log(json.dumps(self.media_by_tag[0]))
             # ------------------- Like -------------------
             self.new_auto_mod_like()
             # ------------------- Follow -------------------
@@ -548,12 +565,14 @@ class InstaBot:
             if self.media_by_tag[0]["owner"]["id"] == self.user_id:
                 self.write_log("Keep calm - It's your own profile ;)")
                 return
-            log_string = "Trying to follow: %s" % (self.media_by_tag[0]["owner"]["id"])
+            url_check = self.url_media_detail % (self.media_by_tag[0]["code"])
+            get_username = self.s.get(url_check)
+            all_data = json.loads(get_username.text)
+            log_string = "Trying to follow: %s" % (all_data['graphql']['shortcode_media']['owner']['username'])
             self.write_log(log_string)
-
             if self.follow(self.media_by_tag[0]["owner"]["id"]) != False:
                 self.bot_follow_list.append([self.media_by_tag[0]["owner"]["id"],
-                                             time.time()])
+                                             time.time(), all_data['graphql']['shortcode_media']['owner']['username']])
                 self.next_iteration["Follow"] = time.time() + \
                                                 self.add_time(self.follow_delay)
 
@@ -563,23 +582,26 @@ class InstaBot:
             if (self.bot_mode == 0) :
                 for f in self.bot_follow_list:
                     if time.time() > (f[1] + self.follow_time):
-                        log_string = "Trying to unfollow #%i: "
+                        log_string = "Trying to unfollow %s: " % (f[2])
                         self.write_log(log_string)
-                        self.auto_unfollow()
-                        self.bot_follow_list.remove(f)
-                        self.next_iteration["Unfollow"] = time.time() + \
+                        #self.auto_unfollow()
+                        if(self.unfollow(f[0]) == 200):
+                            self.bot_follow_list.remove(f)
+                            self.next_iteration["Unfollow"] = time.time() + \
                                                           self.add_time(self.unfollow_delay)
+
             if (self.bot_mode == 1) :
                 unfollow_protocol(self)
 
     def new_auto_mod_comments(self):
         if time.time() > self.next_iteration["Comments"] and self.comments_per_day != 0 \
-                and len(self.media_by_tag) > 0 \
-                and self.check_exisiting_comment(self.media_by_tag[0]['code']) == False:
+                and len(self.media_by_tag) > 0:
             comment_text = self.generate_comment()
             log_string = "Trying to comment: %s" % (self.media_by_tag[0]['id'])
-            self.write_log(log_string)
-            if self.comment(self.media_by_tag[0]['id'], comment_text) != False:
+            media_url = self.url_media % (self.media_by_tag[0]['code'])
+            self.write_log(log_string+" - "+media_url)
+            #self.write_log(log_string)
+            if self.check_exisiting_comment(self.media_by_tag[0]['code']) == False and self.comment(self.media_by_tag[0]['id'], comment_text) != False:
                 self.next_iteration["Comments"] = time.time() + \
                                                   self.add_time(self.comments_delay)
 
@@ -588,19 +610,7 @@ class InstaBot:
         return time * 0.9 + time * 0.2 * random.random()
 
     def generate_comment(self):
-        c_list = list(itertools.product(
-            ["this", "the", "your"],
-            ["photo", "picture", "pic", "shot", "snapshot"],
-            ["is", "looks", "feels", "is really"],
-            ["great", "super", "good", "very good",
-             "good", "wow", "WOW", "cool",
-             "GREAT", "magnificent", "magical", "very cool",
-             "stylish", "so stylish", "beautiful",
-             "so beautiful", "so stylish", "so professional",
-             "lovely", "so lovely", "very lovely",
-             "glorious", "so glorious", "very glorious",
-             "adorable", "excellent", "amazing"],
-            [".", "..", "...", "!", "!!", "!!!"]))
+        c_list = list(itertools.product(*self.comment_list))
 
         repl = [("  ", " "), (" .", "."), (" !", "!")]
         res = " ".join(random.choice(c_list))
@@ -612,18 +622,21 @@ class InstaBot:
         url_check = self.url_media_detail % (media_code)
         check_comment = self.s.get(url_check)
         all_data = json.loads(check_comment.text)
-        if all_data['media']['owner']['id'] == self.user_id:
-                self.write_log("Keep calm - It's your own media ;)")
-                # Del media to don't loop on it
-                del self.media_by_tag[0]
-                return True
-        comment_list = list(all_data['media']['comments']['nodes'])
-        for d in comment_list:
-            if d['user']['id'] == self.user_id:
-                self.write_log("Keep calm - Media already commented ;)")
-                # Del media to don't loop on it
-                del self.media_by_tag[0]
-                return True
+        if all_data['graphql']['shortcode_media']['edge_media_to_comment']['count'] > 0:
+            #self.write_log(json.dumps(all_data['graphql']['shortcode_media']['edge_media_to_comment']['edges']))
+            #if all_data['media']['owner']['id'] == self.user_id:
+            if self.media_by_tag[0]['owner']['id'] == self.user_id:
+                    self.write_log("Keep calm - It's your own media ;)")
+                    # Del media to don't loop on it
+                    del self.media_by_tag[0]
+                    return True
+            comment_list = list(all_data['graphql']['shortcode_media']['edge_media_to_comment']['edges'])
+            for d in comment_list:
+                if d['node']['owner']['id'] == self.user_id:
+                    self.write_log("Keep calm - Media already commented ;)")
+                    # Del media to don't loop on it
+                    del self.media_by_tag[0]
+                    return True
         return False
 
     def auto_unfollow(self):
@@ -635,8 +648,8 @@ class InstaBot:
             self.get_media_id_recent_feed()
         if len(self.media_on_feed) != 0 :
             chooser = random.randint(0,len(self.media_on_feed)-1)
-            current_id=self.media_on_feed[chooser]["owner"]["id"]
-            current_user=self.media_on_feed[chooser]["owner"]["username"]
+            current_id=self.media_on_feed[chooser]["node"]["owner"]["id"]
+            current_user=self.media_on_feed[chooser]["node"]["owner"]["username"]
         if (self.login_status):
             now_time = datetime.datetime.now()
             log_string = "%s : Get user info \n%s"%(self.user_login,now_time.strftime("%d.%m.%Y %H:%M"))
@@ -750,9 +763,8 @@ class InstaBot:
                     json_str = text[(all_data_start + finder_text_start_len + 1) \
                                    : all_data_end]
                     all_data = json.loads(json_str)
-
                     self.media_on_feed = list(all_data['entry_data']['FeedPage'][0]\
-                                            ['feed']['media']['nodes'])
+                                            ['graphql']['user']['edge_web_feed_timeline']['edges'])
                     log_string="Media in recent feed = %i"%(len(self.media_on_feed))
                     self.write_log(log_string)
                 except:
@@ -777,13 +789,14 @@ class InstaBot:
             if self.log_file == 0:
                 self.log_file = 1
                 now_time = datetime.datetime.now()
-                self.log_full_path = '%s%s_%s.log' % (self.log_file_path,
-                                                      self.user_login,
-                                                      now_time.strftime("%d.%m.%Y_%H:%M"))
+                self.log_full_path = self.log_file_path % (self.user_login)
+                #self.log_full_path = '%s%s_%s.log' % (self.log_file_path,
+                #                                      self.user_login,
+                #                                      now_time.strftime("%d.%m.%Y_%H:%M"))
                 formatter = logging.Formatter('%(asctime)s - %(name)s '
                                               '- %(message)s')
                 self.logger = logging.getLogger(self.user_login)
-                self.hdrl = logging.FileHandler(self.log_full_path, mode='w')
+                self.hdrl = logging.FileHandler(self.log_full_path, mode='w', encoding = 'UTF-8')
                 self.hdrl.setFormatter(formatter)
                 self.logger.setLevel(level=logging.INFO)
                 self.logger.addHandler(self.hdrl)
@@ -791,4 +804,5 @@ class InstaBot:
             try:
                 self.logger.info(log_text)
             except UnicodeEncodeError:
+                self.logger.info("Your text has unicode problem!")
                 print("Your text has unicode problem!")
